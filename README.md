@@ -4,7 +4,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/M1noa/Prowling)](https://github.com/M1noa/Prowling/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/M1noa/Prowling)](https://github.com/M1noa/Prowling/issues)
 
-A powerful command-line tool for searching and downloading through Prowlarr. Prowling provides an intuitive terminal interface to search across all your configured Prowlarr indexers.
+A simple CLI tool to use prowlerr to search!
 
 ## Features
 
