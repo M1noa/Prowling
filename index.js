@@ -353,6 +353,11 @@ class ProwlingClient {
                             // Build choices array dynamically based on available URLs
                             const actionChoices = [];
                             
+                            // Add download option if client is configured and URL is available
+                            if (this.downloadClient && (selected.downloadUrl || selected.magnetUrl)) {
+                                actionChoices.push({ name: '⚡ Download with client', value: 'download_client' });
+                            }
+                            
                             // Only add torrent URL option if it exists
                             if (selected.downloadUrl) {
                                 actionChoices.push({ name: '⚟ Copy torrent URL', value: 'download_url' });
@@ -381,7 +386,9 @@ class ProwlingClient {
                                 }
                             ]);
 
-                            if (action === 'download_url') {
+                            if (action === 'download_client') {
+                                await this.downloadToClient(selected);
+                            } else if (action === 'download_url') {
                                 console.log(chalk.cyan('\nTorrent URL:'));
                                 console.log(chalk.white(selected.downloadUrl));
                                 console.log(chalk.gray('\nPress Enter to go back...'));
@@ -483,6 +490,34 @@ class ProwlingClient {
             console.log(chalk.gray('\nPress Enter to go back...'));
             await inquirer.prompt([{ type: 'input', name: 'continue', message: '' }]);
         }
+    }
+    async downloadToClient(selected) {
+        const spinner = ora({
+            text: 'Sending to download client...',
+            color: 'cyan',
+            spinner: 'dots'
+        }).start();
+
+        try {
+            if (!this.downloadClient) {
+                spinner.fail(chalk.red('No download client configured'));
+                return;
+            }
+
+            const downloadData = {
+                title: selected.title,
+                downloadUrl: selected.downloadUrl,
+                magnetUrl: selected.magnetUrl
+            };
+
+            await axios.post(`${this.baseUrl}/api/v1/release`, downloadData);
+            spinner.succeed(chalk.green('✓ Sent to download client'));
+        } catch (error) {
+            spinner.fail(chalk.red(`Failed to send to download client: ${error.message}`));
+        }
+
+        console.log(chalk.gray('\nPress Enter to go back...'));
+        await inquirer.prompt([{ type: 'input', name: 'continue', message: '' }]);
     }
 }
 
