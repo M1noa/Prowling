@@ -8,19 +8,18 @@ A simple CLI tool to use prowlerr to search!
 
 ## Features
 
-- 🔍 Search across all your Prowlarr indexers from the command line
-- 🗂️ Filter searches by category (Movies, TV Shows, etc.)
-- ⚡ Sort results by various criteria (size, seeders, date, etc.)
-- 🔎 Search within search results
-- 📋 Copy torrent and magnet URLs
-- 🎨 Beautiful terminal UI with color-coded information
+- 🔍 Bulk search em all
+- 🗂️ Filter searches by category
+- ⚡ Sort results 
+- 🔎 Search within results
+- 📋 Simply copy torrent and magnet URLs
+- 🎨 Pretty terminal UI with color-coded information
 
 ## Installation
 
 ### Prerequisites
 
 - Node.js (v12 or higher)
-- Git
 - A running Prowlarr instance with configured indexers
 
 
@@ -52,7 +51,7 @@ On run, you'll be prompted to enter your Prowlarr server URL and API key. These 
 
 ## Contributing
 
-Contributions are welcome and appreciated! Here's how you can contribute:
+Contributions are welcome and needed! Here's how you can contribute:
 
 1. **Fork** the repository on GitHub
 2. **Clone** your fork to your local machine
@@ -62,12 +61,14 @@ Contributions are welcome and appreciated! Here's how you can contribute:
 6. Submit a **Pull Request** to the main repository
 
 
-### Guidelines
+### Guidelines 
 
 - Follow the existing code style
 - Add comments for complex logic
 - Update documentation for any new features
 - Write descriptive commit messages
+
+ty <3
 
 ## License
 
