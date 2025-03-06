@@ -72,13 +72,14 @@ ty <3
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License
 
 
 ## TODO
 
-- Finish // fix the "Download with client" option with a default dir saved in the config file and more
-- Add more customization // settings
+- [ ] Finish // fix the "Download with client" option with a default dir saved in the config file and more
+- [ ] Add more customization // settings
+
 ---
 
 [```made with <3 by Minoa```](https://github.com/M1noa)

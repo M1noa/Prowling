@@ -221,7 +221,7 @@ class ProwlingClient {
                 };
                 
                 const choices = results.map(result => ({
-                    name: `${chalk.green(result.title)} ${chalk.dim('|')} ${chalk.blue(result.indexer)} ${chalk.dim('|')} ${chalk.yellow(formatSize(result.size))} ${chalk.dim('|')} ${result.seeders !== undefined && result.seeders !== null ? chalk.green(`⚡${result.seeders}`) : chalk.red('Unknown')}`,
+                    name: `${chalk.green(result.title)} ${chalk.dim('|')} ${chalk.blue(result.indexer)} ${chalk.dim('|')} ${chalk.yellow(formatSize(result.size))} ${chalk.dim('|')} ${result.seeders && result.seeders > 0 ? chalk.green(`⚡${result.seeders}`) : chalk.yellow('Unkn')}`,
                     value: result,
                     short: result.title
                 }));
@@ -239,7 +239,7 @@ class ProwlingClient {
                             prefix: chalk.cyan('⚟'),
                             choices: [
                                 ...currentResults.map(result => ({
-                                    name: `${chalk.green(result.title)} ${chalk.dim('|')} ${chalk.blue(result.indexer)} ${chalk.dim('|')} ${chalk.yellow(formatSize(result.size))} ${chalk.dim('|')} ${result.seeders !== undefined && result.seeders !== null ? chalk.green(`⚡${result.seeders}`) : chalk.red('Unknown')}`,
+                                    name: `${chalk.green(result.title)} ${chalk.dim('|')} ${chalk.blue(`${result.indexer} (${this.indexers.find(i => i.name === result.indexer)?.priority || 0})`)} ${chalk.dim('|')} ${chalk.yellow(formatSize(result.size))} ${chalk.dim('|')} ${result.seeders && result.seeders > 0 ? chalk.green(`⚡${result.seeders}`) : chalk.yellow('Unkn')}`,
                                     value: result,
                                     short: result.title
                                 })),
@@ -270,7 +270,9 @@ class ProwlingClient {
                                     { name: 'Size (Large to Small)', value: 'size_desc' },
                                     { name: 'Size (Small to Large)', value: 'size_asc' },
                                     { name: 'Date (Newest First)', value: 'date_desc' },
-                                    { name: 'Date (Oldest First)', value: 'date_asc' }
+                                    { name: 'Date (Oldest First)', value: 'date_asc' },
+                                    { name: 'Indexer Priority (High to Low)', value: 'indexer_priority_desc' },
+                                    { name: 'Indexer Priority (Low to High)', value: 'indexer_priority_asc' }
                                 ]
                             }
                         ]);
@@ -293,6 +295,16 @@ class ProwlingClient {
                                     return new Date(b.publishDate || 0) - new Date(a.publishDate || 0);
                                 case 'date_asc':
                                     return new Date(a.publishDate || 0) - new Date(b.publishDate || 0);
+                                case 'indexer_priority_desc':
+                                    // Get indexer priority from this.indexers
+                                    const priorityA1 = this.indexers.find(i => i.name === a.indexer)?.priority || 0;
+                                    const priorityB1 = this.indexers.find(i => i.name === b.indexer)?.priority || 0;
+                                    return priorityB1 - priorityA1; // Higher priority first
+                                case 'indexer_priority_asc':
+                                    // Get indexer priority from this.indexers
+                                    const priorityA2 = this.indexers.find(i => i.name === a.indexer)?.priority || 0;
+                                    const priorityB2 = this.indexers.find(i => i.name === b.indexer)?.priority || 0;
+                                    return priorityA2 - priorityB2; // Lower priority first
                                 default:
                                     return 0;
                             }
