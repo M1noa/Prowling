@@ -80,4 +80,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Add more customization // settings
 ---
 
-```made with <3 by [Minoa](https://github.com/M1noa)```
+```made with <3 by ```[```Minoa```](https://github.com/M1noa)
