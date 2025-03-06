@@ -23,13 +23,8 @@ A powerful command-line tool for searching and downloading through Prowlarr. Pro
 - Git
 - A running Prowlarr instance with configured indexers
 
-### Install from NPM
 
-```bash
-npm install -g prowling
-```
-
-### Install from Source
+### Running
 
 ```bash
 # Clone the repository
@@ -85,4 +80,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Add more customization // settings
 ---
 
-Made with ❤️ by [M1noa](https://github.com/M1noa)
+```made with <3 by [Minoa](https://github.com/M1noa)```
