@@ -6,6 +6,10 @@
   "bin": {
     "prowling": "./index.js"
   },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
   "dependencies": {
     "axios": "^1.8.1",
     "chalk": "^4.1.2",

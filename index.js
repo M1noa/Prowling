@@ -18,6 +18,18 @@ class ProwlingClient {
             usenet: 'usenet'
         };
         this.qbittorrentUrl = '';
+        this.qbittorrentSettings = {
+            username: '',
+            password: '',
+            category: '',
+            savePath: '',
+            useTorrentManagement: true,
+            sessionCookie: ''
+        };
+        
+        // Search caching
+        this.searchCache = {};
+        this.lastCacheClear = Date.now();
         
         // Default theme settings
         this.theme = {
@@ -79,25 +91,60 @@ class ProwlingClient {
                 if (config.settings) {
                     this.settings = { ...this.settings, ...config.settings };
                 }
+
+                // Apply saved qBittorrent settings if they exist
+                if (config.qbittorrentSettings) {
+                    this.qbittorrentSettings = { ...this.qbittorrentSettings, ...config.qbittorrentSettings };
+                }
+
+                // Apply other saved settings
+                if (config.serverUrl) this.baseUrl = config.serverUrl;
+                if (config.apiKey) axios.defaults.headers.common['X-Api-Key'] = config.apiKey;
+                if (config.qbittorrentUrl) this.qbittorrentUrl = config.qbittorrentUrl;
+
+                // Initialize search cache if enabled
+                if (this.settings.cacheResults) {
+                    this.searchCache = config.searchCache || {};
+                    this.lastCacheClear = config.lastCacheClear || Date.now();
+                }
                 
                 return config;
             }
         } catch (error) {
             console.log(chalk.yellow('Could not load config file. Using default settings.'));
         }
-        return { serverUrl: '', apiKey: '', qbittorrentUrl: '', theme: this.theme, settings: this.settings };
+        return {
+            serverUrl: '',
+            apiKey: '',
+            qbittorrentUrl: '',
+            qbittorrentSettings: this.qbittorrentSettings,
+            theme: this.theme,
+            settings: this.settings,
+            searchCache: {},
+            lastCacheClear: Date.now()
+        };
     }
 
-    saveConfig(serverUrl, apiKey, qbittorrentUrl, theme = this.theme, settings = this.settings) {
+    saveConfig(serverUrl, apiKey, qbittorrentUrl, qbittorrentSettings = this.qbittorrentSettings, theme = this.theme, settings = this.settings) {
         try {
-            fs.writeFileSync(this.configPath, JSON.stringify({ 
-                serverUrl, 
-                apiKey, 
+            // Prepare config data
+            const configData = {
+                serverUrl,
+                apiKey,
                 qbittorrentUrl,
+                qbittorrentSettings,
                 theme,
-                settings
-            }, null, 4));
-            console.log(chalk.green('✓ Configuration Loaded'));
+                settings,
+                // Include search cache data if caching is enabled
+                ...(this.settings.cacheResults ? {
+                    searchCache: this.searchCache,
+                    lastCacheClear: this.lastCacheClear
+                } : {})
+            };
+
+            // Save to file
+            fs.writeFileSync(this.configPath, JSON.stringify(configData, null, 4));
+            console.log(chalk.green('✓ Configuration Saved'));
         } catch (error) {
             console.log(chalk.red(`Failed to save configuration: ${error.message}`));
         }
@@ -218,7 +265,7 @@ class ProwlingClient {
                     choices: [
                         { name: '⚓ Movies', value: 2000 },
                         { name: '⚔ TV Shows', value: 5000 },
-                        ...(this.settings.showAdultContent ? [{ name: '⚠ Adult Content', value: [6000, 100051, 126537, 100007, 6060, 100015, 6050, 6070, 6080, 6090, 100017, 100018, 100019, 100020] }] : []),
+                        ...(this.settings.showAdultContent ? [{ name: '⚠ Adult Content', value: [6000, 100051, 126537, 100007, 6060, 100015, 6050, 6070, 6080, 6090, 100017, 100018, 100019, 100020, 6010, 6020, 6030, 6040, 6070] }] : []),
                         { name: '⊡ All Categories', value: 'all' },
                         { name: '← Back', value: 'back' }
                     ],
@@ -276,25 +323,75 @@ class ProwlingClient {
             if (indexerIds.length > 0) {
                 searchParams.indexerIds = indexerIds;
             }
+
+            // Check if we should try to use cached results
+            let results = [];
+            const cacheKey = `${query}_${category}_${JSON.stringify(indexerIds)}`;
+            
+            if (this.settings.cacheResults) {
+                // Clear old cache entries if needed
+                const cacheAge = Date.now() - this.lastCacheClear;
+                if (cacheAge > this.settings.cacheDuration * 60 * 1000) {
+                    this.searchCache = {};
+                    this.lastCacheClear = Date.now();
+                    // Save the cleared cache state
+                    this.saveConfig(
+                        this.baseUrl,
+                        axios.defaults.headers.common['X-Api-Key'],
+                        this.qbittorrentUrl,
+                        this.qbittorrentSettings
+                    );
+                }
+
+                // Check if we have cached results
+                const cachedResults = this.searchCache[cacheKey];
+                if (cachedResults) {
+                    const cacheEntryAge = Date.now() - cachedResults.timestamp;
+                    if (cacheEntryAge <= this.settings.cacheDuration * 60 * 1000) {
+                        spinner.succeed(chalk.green(`Using cached results from ${Math.round(cacheEntryAge / 1000 / 60)} minutes ago`));
+                        results = cachedResults.data;
+                    }
+                }
+            }
             
             try {
-                // Use the main search endpoint
-                const { data: results } = await axios.get(`${this.baseUrl}/api/v1/search`, {
-                    params: searchParams,
-                    paramsSerializer: params => {
-                        // Handle arrays in params properly
-                        const parts = [];
-                        Object.keys(params).forEach(key => {
-                            const value = params[key];
-                            if (Array.isArray(value)) {
-                                value.forEach(v => parts.push(`${key}=${v}`));
-                            } else {
-                                parts.push(`${key}=${encodeURIComponent(value)}`);
-                            }
-                        });
-                        return parts.join('&');
+                // Only perform search if we don't have valid cached results
+                if (results.length === 0) {
+                    // Use the main search endpoint
+                    const { data: searchResults } = await axios.get(`${this.baseUrl}/api/v1/search`, {
+                        params: searchParams,
+                        paramsSerializer: params => {
+                            // Handle arrays in params properly
+                            const parts = [];
+                            Object.keys(params).forEach(key => {
+                                const value = params[key];
+                                if (Array.isArray(value)) {
+                                    value.forEach(v => parts.push(`${key}=${v}`));
+                                } else {
+                                    parts.push(`${key}=${encodeURIComponent(value)}`);
+                                }
+                            });
+                            return parts.join('&');
+                        }
+                    });
+                    
+                    results = searchResults;
+
+                    // Cache the results if caching is enabled
+                    if (this.settings.cacheResults) {
+                        this.searchCache[cacheKey] = {
+                            data: results,
+                            timestamp: Date.now()
+                        };
+                        // Save the updated cache
+                        this.saveConfig(
+                            this.baseUrl,
+                            axios.defaults.headers.common['X-Api-Key'],
+                            this.qbittorrentUrl,
+                            this.qbittorrentSettings
+                        );
                     }
-                });
+                }
                 
                 spinner.succeed(chalk.green(`Search completed - Found ${results.length} results`));
                 
@@ -333,9 +430,52 @@ class ProwlingClient {
                 let isFiltered = false;
 
                 while (true) {
+                    // Create custom prompt with accelerated scrolling
+                    const KeyPressDuration = 6000; // 6 seconds
+                    let keyPressStart = 0;
+                    let acceleratedScroll = false;
+
+                    class AcceleratedListPrompt extends inquirer.prompt.prompts.list {
+                        onKeypress(e) {
+                            const key = e.key || e;
+                            if (key.name === 'up' || key.name === 'down') {
+                                const now = Date.now();
+                                
+                                // Start tracking key press duration
+                                if (!keyPressStart) {
+                                    keyPressStart = now;
+                                    acceleratedScroll = false;
+                                }
+                                
+                                // Check if we should enable accelerated scrolling
+                                if (now - keyPressStart > KeyPressDuration) {
+                                    acceleratedScroll = true;
+                                }
+                                
+                                // Apply accelerated scrolling
+                                if (acceleratedScroll) {
+                                    // Move two items at a time
+                                    super.onKeypress(e);
+                                    super.onKeypress(e);
+                                } else {
+                                    super.onKeypress(e);
+                                }
+                            } else {
+                                // Reset tracking for other keys
+                                keyPressStart = 0;
+                                acceleratedScroll = false;
+                                super.onKeypress(e);
+                            }
+                            this.render();
+                        }
+                    }
+
+                    // Register the custom prompt
+                    inquirer.registerPrompt('accelerated-list', AcceleratedListPrompt);
+
                     const { selected } = await inquirer.prompt([
                         {
-                            type: 'list',
+                            type: 'accelerated-list',
                             name: 'selected',
                             message: isFiltered ? 'Select an item from filtered results:' : 'Select an item to view details:',
                             prefix: chalk.cyan('⚟'),
@@ -649,7 +789,7 @@ class ProwlingClient {
 
     async openInQBittorrent(selected) {
         const spinner = ora({
-            text: 'Sending to qBittorrent...',
+            text: 'Connecting to qBittorrent...',
             color: 'cyan',
             spinner: 'dots'
         }).start();
@@ -659,29 +799,110 @@ class ProwlingClient {
                 spinner.fail(chalk.red('qBittorrent URL not configured'));
                 return;
             }
+// Check if we need to login
+if (!this.qbittorrentSettings.sessionCookie) {
+    spinner.text = 'Logging into qBittorrent...';
+    
+    // Verify credentials exist
+    if (!this.qbittorrentSettings.username || !this.qbittorrentSettings.password) {
+        spinner.fail(chalk.red('qBittorrent credentials not configured'));
+        console.log(chalk.yellow('Please configure qBittorrent credentials in settings.'));
+        return;
+    }
 
-            // Determine which URL to use (magnet preferred over torrent file)
-            const url = selected.magnetUrl || selected.downloadUrl;
-            if (!url) {
-                spinner.fail(chalk.red('No valid URL available for this item'));
-                return;
-            }
+    try {
+        // Attempt login
+        const loginData = new URLSearchParams();
+        loginData.append('username', this.qbittorrentSettings.username);
+        loginData.append('password', this.qbittorrentSettings.password);
 
-            // Send to qBittorrent Web API
-            const formData = new URLSearchParams();
-            formData.append('urls', url);
+        const loginResponse = await axios.post(`${this.qbittorrentUrl}/api/v2/auth/login`, loginData);
+        
+        if (loginResponse.headers['set-cookie']) {
+            this.qbittorrentSettings.sessionCookie = loginResponse.headers['set-cookie'][0];
+        } else {
+            throw new Error('No session cookie received');
+        }
+    } catch (loginError) {
+        spinner.fail(chalk.red('Failed to login to qBittorrent'));
+        console.log(chalk.yellow('Please check your credentials in settings.'));
+        return;
+    }
+}
 
+spinner.text = 'Sending to qBittorrent...';
+
+// Get category save path if using torrent management
+let categoryPath = '';
+if (this.qbittorrentSettings.useTorrentManagement && this.qbittorrentSettings.category) {
+    try {
+        const response = await axios.get(`${this.qbittorrentUrl}/api/v2/torrents/categories`, {
+            headers: { 'Cookie': this.qbittorrentSettings.sessionCookie }
+        });
+        
+        const categories = response.data || {};
+        if (categories[this.qbittorrentSettings.category]) {
+            categoryPath = categories[this.qbittorrentSettings.category].savePath;
+        }
+    } catch (error) {
+        console.log(chalk.yellow('Warning: Could not fetch category save path'));
+    }
+}
+
+// Determine which URL to use (magnet preferred over torrent file)
+const url = selected.magnetUrl || selected.downloadUrl;
+if (!url) {
+    spinner.fail(chalk.red('No valid URL available for this item'));
+    return;
+}
+
+// Prepare download parameters
+const formData = new URLSearchParams();
+formData.append('urls', url);
+
+// Add category if set
+if (this.qbittorrentSettings.category) {
+    formData.append('category', this.qbittorrentSettings.category);
+}
+
+// Handle save path based on settings
+if (this.qbittorrentSettings.useTorrentManagement) {
+    // If using torrent management and we have a category path, use it
+    if (categoryPath) {
+        formData.append('savepath', categoryPath);
+    }
+    // Set content layout to Original for proper category folder structure
+    formData.append('useAutoTMM', 'true');
+    formData.append('contentLayout', 'Original');
+} else {
+    // If not using torrent management, use custom save path
+    if (this.qbittorrentSettings.savePath) {
+        formData.append('savepath', this.qbittorrentSettings.savePath);
+    }
+    formData.append('useAutoTMM', 'false');
+    formData.append('contentLayout', 'NoSubfolder');
+}
+            formData.append('contentLayout', this.qbittorrentSettings.useTorrentManagement ? 'Original' : 'NoSubfolder');
+
+            // Send to qBittorrent Web API with session cookie
             await axios.post(`${this.qbittorrentUrl}/api/v2/torrents/add`, formData, {
                 headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Cookie': this.qbittorrentSettings.sessionCookie
                 }
             });
 
             spinner.succeed(chalk.green('✓ Sent to qBittorrent'));
         } catch (error) {
             spinner.fail(chalk.red(`Failed to send to qBittorrent: ${error.message}`));
-            console.log(chalk.yellow('\nTip: Make sure qBittorrent WebUI is enabled and the URL is correct.'));
-            console.log(chalk.yellow('You may need to login to qBittorrent WebUI first in your browser.'));
+            
+            if (error.response?.status === 403) {
+                console.log(chalk.yellow('\nSession expired. Please try again to re-authenticate.'));
+                this.qbittorrentSettings.sessionCookie = ''; // Clear invalid session
+                this.saveConfig(this.baseUrl, axios.defaults.headers.common['X-Api-Key'], this.qbittorrentUrl, this.qbittorrentSettings);
+            } else {
+                console.log(chalk.yellow('\nTip: Make sure qBittorrent WebUI is enabled and the URL is correct.'));
+            }
         }
 
         console.log(chalk.gray('\nPress Enter to go back...'));
@@ -930,14 +1151,55 @@ class ProwlingClient {
         console.log(chalk[this.theme.info]('\n📝 Customize Download Settings'));
         console.log(chalk[this.theme.secondary]('Configure how downloads are handled.\n'));
         
+        // Check qBittorrent connection status and fetch categories
+        let qbittorrentConnected = false;
+        let categories = [];
+        
+        if (this.qbittorrentUrl && this.qbittorrentSettings.username && this.qbittorrentSettings.password) {
+            const spinner = ora({
+                text: 'Testing qBittorrent connection...',
+                color: 'cyan',
+                spinner: 'dots'
+            }).start();
+
+            try {
+                // Try to login and fetch categories
+                const loginData = new URLSearchParams();
+                loginData.append('username', this.qbittorrentSettings.username);
+                loginData.append('password', this.qbittorrentSettings.password);
+                
+                const loginResponse = await axios.post(`${this.qbittorrentUrl}/api/v2/auth/login`, loginData);
+                if (loginResponse.headers['set-cookie']) {
+                    this.qbittorrentSettings.sessionCookie = loginResponse.headers['set-cookie'][0];
+                    
+                    // Fetch categories
+                    const response = await axios.get(`${this.qbittorrentUrl}/api/v2/torrents/categories`, {
+                        headers: { 'Cookie': this.qbittorrentSettings.sessionCookie }
+                    });
+                    categories = Object.keys(response.data || {});
+                    qbittorrentConnected = true;
+                    spinner.succeed(chalk.green('Connected to qBittorrent'));
+                }
+            } catch (error) {
+                spinner.fail(chalk.red(`qBittorrent connection failed: ${error.message}`));
+                console.log(chalk.yellow('Some settings may not be available until connected'));
+            }
+        }
+        
         const { downloadSetting } = await inquirer.prompt([
             {
                 type: 'list',
                 name: 'downloadSetting',
                 message: 'Select a download setting to customize:',
                 choices: [
-                    { name: 'Default Download Directory', value: 'defaultDownloadDir' },
-                    { name: 'Confirm Downloads', value: 'confirmDownloads' },
+                    { name: '🔐 qBittorrent Login Credentials', value: 'qbittorrentLogin' },
+                    ...(qbittorrentConnected ? [
+                        { name: '📁 qBittorrent Category', value: 'qbittorrentCategory' },
+                        { name: '💾 qBittorrent Save Location', value: 'qbittorrentSave' },
+                        { name: '⚙️ qBittorrent Management', value: 'qbittorrentManage' }
+                    ] : []),
+                    { name: '📥 Default Download Directory', value: 'defaultDownloadDir' },
+                    { name: '✓ Confirm Downloads', value: 'confirmDownloads' },
                     { name: '← Back to Settings Menu', value: 'back' }
                 ],
                 loop: true
@@ -948,32 +1210,185 @@ class ProwlingClient {
             return;
         }
         
-        if (downloadSetting === 'defaultDownloadDir') {
-            const { value } = await inquirer.prompt([
-                {
-                    type: 'input',
-                    name: 'value',
-                    message: 'Enter default download directory:',
-                    default: this.settings.defaultDownloadDir
+        switch (downloadSetting) {
+            case 'qbittorrentLogin':
+                const credentials = await inquirer.prompt([
+                    {
+                        type: 'input',
+                        name: 'username',
+                        message: 'Enter qBittorrent WebUI username:',
+                        default: this.qbittorrentSettings.username
+                    },
+                    {
+                        type: 'password',
+                        name: 'password',
+                        message: 'Enter qBittorrent WebUI password:',
+                        mask: '*'
+                    }
+                ]);
+                
+                // Validate credentials
+                const spinner = ora({
+                    text: 'Validating credentials...',
+                    color: 'cyan',
+                    spinner: 'dots'
+                }).start();
+
+                try {
+                    const loginData = new URLSearchParams();
+                    loginData.append('username', credentials.username);
+                    loginData.append('password', credentials.password);
+                    const response = await axios.post(`${this.qbittorrentUrl}/api/v2/auth/login`, loginData);
+                    
+                    if (response.headers['set-cookie']) {
+                        spinner.succeed(chalk.green('Credentials validated successfully'));
+                        this.qbittorrentSettings.username = credentials.username;
+                        this.qbittorrentSettings.password = credentials.password;
+                        this.qbittorrentSettings.sessionCookie = response.headers['set-cookie'][0];
+                    } else {
+                        throw new Error('No session cookie received');
+                    }
+                } catch (error) {
+                    spinner.fail(chalk.red('Invalid credentials'));
+                    console.log(chalk.yellow('Please check your username and password'));
+                    break;
                 }
-            ]);
-            
-            this.settings.defaultDownloadDir = value;
-        } else if (downloadSetting === 'confirmDownloads') {
-            const { value } = await inquirer.prompt([
-                {
-                    type: 'confirm',
-                    name: 'value',
-                    message: 'Confirm before downloading?',
-                    default: this.settings.confirmDownloads
+                break;
+                
+            case 'qbittorrentCategory':
+                // Create choices array with existing categories
+                let categoryChoices = [
+                    { name: '+ Create New Category', value: 'new' },
+                    { name: '(None)', value: '' },
+                    new inquirer.Separator('─── Existing Categories ───')
+                ];
+                
+                if (categories.length > 0) {
+                    categoryChoices = [
+                        ...categoryChoices,
+                        ...categories.map(cat => ({ name: cat, value: cat }))
+                    ];
                 }
-            ]);
-            
-            this.settings.confirmDownloads = value;
+                
+                const { categoryChoice } = await inquirer.prompt([
+                    {
+                        type: 'list',
+                        name: 'categoryChoice',
+                        message: 'Select or create a category:',
+                        choices: categoryChoices,
+                        default: this.qbittorrentSettings.category
+                    }
+                ]);
+                
+                if (categoryChoice === 'new') {
+                    const { newCategory } = await inquirer.prompt([
+                        {
+                            type: 'input',
+                            name: 'newCategory',
+                            message: 'Enter new category name:',
+                            validate: input => input.length > 0 || 'Category name cannot be empty'
+                        }
+                    ]);
+                    
+                    // Create the new category in qBittorrent
+                    try {
+                        const formData = new URLSearchParams();
+                        formData.append('category', newCategory);
+                        formData.append('savePath', ''); // Let qBittorrent use default path
+                        
+                        await axios.post(`${this.qbittorrentUrl}/api/v2/torrents/createCategory`, formData, {
+                            headers: { 'Cookie': this.qbittorrentSettings.sessionCookie }
+                        });
+                        
+                        this.qbittorrentSettings.category = newCategory;
+                        console.log(chalk.green(`✓ Created new category: ${newCategory}`));
+                    } catch (error) {
+                        console.log(chalk.red(`Failed to create category: ${error.message}`));
+                        break;
+                    }
+                } else {
+                    this.qbittorrentSettings.category = categoryChoice;
+                }
+                break;
+                
+            case 'qbittorrentSave':
+                const { savePath } = await inquirer.prompt([
+                    {
+                        type: 'input',
+                        name: 'savePath',
+                        message: 'Enter default save path for qBittorrent:',
+                        default: this.qbittorrentSettings.savePath
+                    }
+                ]);
+                
+                // Validate the path exists on server
+                try {
+                    const formData = new URLSearchParams();
+                    formData.append('json', JSON.stringify({
+                        save_path: savePath
+                    }));
+                    
+                    await axios.post(`${this.qbittorrentUrl}/api/v2/app/setPreferences`, formData, {
+                        headers: {
+                            'Cookie': this.qbittorrentSettings.sessionCookie,
+                            'Content-Type': 'application/x-www-form-urlencoded'
+                        }
+                    });
+                    
+                    this.qbittorrentSettings.savePath = savePath;
+                } catch (error) {
+                    console.log(chalk.red(`Invalid path or insufficient permissions: ${error.message}`));
+                    break;
+                }
+                break;
+                
+            case 'qbittorrentManage':
+                const { useTorrentManagement } = await inquirer.prompt([
+                    {
+                        type: 'confirm',
+                        name: 'useTorrentManagement',
+                        message: 'Enable qBittorrent torrent management? (Downloads to category folder)',
+                        default: this.qbittorrentSettings.useTorrentManagement
+                    }
+                ]);
+                
+                this.qbittorrentSettings.useTorrentManagement = useTorrentManagement;
+                break;
+                
+            case 'defaultDownloadDir':
+                const { value: downloadDir } = await inquirer.prompt([
+                    {
+                        type: 'input',
+                        name: 'value',
+                        message: 'Enter default download directory:',
+                        default: this.settings.defaultDownloadDir
+                    }
+                ]);
+                
+                this.settings.defaultDownloadDir = downloadDir;
+                break;
+                
+            case 'confirmDownloads':
+                const { value: confirmDownloads } = await inquirer.prompt([
+                    {
+                        type: 'confirm',
+                        name: 'value',
+                        message: 'Confirm before downloading?',
+                        default: this.settings.confirmDownloads
+                    }
+                ]);
+                
+                this.settings.confirmDownloads = confirmDownloads;
+                break;
         }
         
-        // Save the updated configuration
-        this.saveConfig(this.baseUrl, axios.defaults.headers.common['X-Api-Key'], this.qbittorrentUrl);
+        // Save the updated configuration with qBittorrent settings
+        this.saveConfig(
+            this.baseUrl,
+            axios.defaults.headers.common['X-Api-Key'],
+            this.qbittorrentUrl,
+            this.qbittorrentSettings
+        );
         console.log(chalk[this.theme.success](`✓ ${downloadSetting} updated successfully`));
         
         console.log(chalk.gray('\nPress Enter to continue...'));
